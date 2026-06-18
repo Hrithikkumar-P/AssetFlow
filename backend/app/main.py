@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,12 +15,24 @@ app = FastAPI(
     description="REST API for dynamic IT asset types, assets, pricing, repairs and history.",
 )
 
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# Restrict which web origins may call the API. Override with the CORS_ORIGINS
+# env var (comma-separated list of exact origins). Defaults to the local dev
+# frontends (Vite :5173 and the nginx container :3000). Never use "*" in
+# production — list the real site origin(s) instead.
+_DEFAULT_ORIGINS = "http://localhost:3000,http://localhost:5173"
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", _DEFAULT_ORIGINS).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])

@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from typing import Optional
 
 from app.deps import get_db, get_current_user
 from app.models import AssetPrice, Asset, User
 from app.schemas import PriceCreate, PriceUpdate
-from app.serializers import price_to_dict
+from app.serializers import price_to_dict, _to_float
 from app.activity import log_activity
 
 router = APIRouter()
@@ -18,16 +17,27 @@ def list_prices(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(AssetPrice).join(Asset, AssetPrice.asset_id == Asset.id)
+    # vendor / invoice_number are encrypted at rest, so they can't be filtered
+    # with SQL ILIKE. We fetch (joined with Asset) and filter in the app layer.
+    prices = (
+        db.query(AssetPrice)
+        .join(Asset, AssetPrice.asset_id == Asset.id)
+        .order_by(AssetPrice.created_at.desc())
+        .all()
+    )
     if search:
-        like = f"%{search}%"
-        query = query.filter(
-            Asset.asset_id.ilike(like)
-            | Asset.description.ilike(like)
-            | AssetPrice.vendor.ilike(like)
-            | AssetPrice.invoice_number.ilike(like)
-        )
-    prices = query.order_by(AssetPrice.created_at.desc()).all()
+        s = search.lower()
+
+        def matches(p):
+            haystay = [
+                p.asset.asset_id if p.asset else None,
+                p.asset.description if p.asset else None,
+                p.vendor,           # already decrypted by the ORM type
+                p.invoice_number,   # already decrypted by the ORM type
+            ]
+            return any(h and s in h.lower() for h in haystay)
+
+        prices = [p for p in prices if matches(p)]
     return [price_to_dict(p) for p in prices]
 
 
@@ -36,17 +46,16 @@ def price_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    rows = (
-        db.query(AssetPrice.currency, func.sum(AssetPrice.purchase_price), func.count(AssetPrice.id))
-        .group_by(AssetPrice.currency)
-        .all()
-    )
-    return {
-        "by_currency": [
-            {"currency": c or "INR", "total": float(total or 0), "count": count}
-            for c, total, count in rows
-        ]
-    }
+    # purchase_price is encrypted, so SUM is computed in the app layer.
+    # The ORM type already decrypts p.purchase_price to its plaintext string.
+    totals = {}
+    for p in db.query(AssetPrice).all():
+        cur = p.currency or "INR"
+        amount = _to_float(p.purchase_price) or 0.0
+        bucket = totals.setdefault(cur, {"currency": cur, "total": 0.0, "count": 0})
+        bucket["total"] += amount
+        bucket["count"] += 1
+    return {"by_currency": list(totals.values())}
 
 
 @router.post("/", status_code=201)
@@ -74,7 +83,8 @@ def create_price(
         performed_by=current_user.email,
         asset_id=asset.id,
         asset_code=asset.asset_id,
-        new_value=f"{payload.currency} {payload.purchase_price}",
+        # Avoid writing the (sensitive) amount into the plaintext history log.
+        new_value=f"{payload.currency} purchase price recorded",
     )
     db.commit()
     db.refresh(price)

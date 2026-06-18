@@ -1,10 +1,11 @@
 from sqlalchemy import (
     Column, Integer, BigInteger, String, DateTime, Date,
-    ForeignKey, Text, Boolean, Numeric, UniqueConstraint,
+    ForeignKey, Text, Boolean, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+from app.encryption import EncryptedString
 
 SCHEMA = "asset_mgr"
 
@@ -180,11 +181,11 @@ class AssetPrice(Base):
         ForeignKey(f"{SCHEMA}.assets.id", ondelete="CASCADE"),
         nullable=False,
     )
-    purchase_price = Column(Numeric(12, 2), nullable=True)
+    purchase_price = Column(EncryptedString, nullable=True)   # encrypted at rest
     currency = Column(String(10), default="INR")         # INR|USD|EUR|GBP|AED
     purchase_date = Column(Date, nullable=True)
-    vendor = Column(String(150), nullable=True)
-    invoice_number = Column(String(100), nullable=True)
+    vendor = Column(EncryptedString, nullable=True)           # encrypted at rest
+    invoice_number = Column(EncryptedString, nullable=True)   # encrypted at rest
     warranty_start = Column(Date, nullable=True)
     warranty_end = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
@@ -216,8 +217,8 @@ class Repair(Base):
     sent_date = Column(Date, nullable=True)
     returned_date = Column(Date, nullable=True)
     time_taken_days = Column(Integer, nullable=True)
-    repair_vendor = Column(String(150), nullable=True)
-    repair_cost = Column(Numeric(12, 2), nullable=True)
+    repair_vendor = Column(EncryptedString, nullable=True)    # encrypted at rest
+    repair_cost = Column(EncryptedString, nullable=True)      # encrypted at rest
     repair_currency = Column(String(10), default="INR")
     under_warranty = Column(Boolean, default=False)
     status = Column(String(30), default="Open")          # Open|In Progress|Completed|Cancelled
@@ -245,6 +246,23 @@ class PasswordResetOTP(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")
+
+
+# ── Login Attempts (failed-login lockout) ────────────────────────────────────
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    __table_args__ = {"schema": SCHEMA}
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey(f"{SCHEMA}.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    successful = Column(Boolean, default=False)
+    attempted_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User")
 
