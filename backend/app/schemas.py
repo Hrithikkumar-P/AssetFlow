@@ -28,6 +28,14 @@ class UserCreate(BaseModel):
     role: str = "it_admin"
 
 
+class SetupRequest(BaseModel):
+    """First-run creation of the very first Super Admin."""
+    email: str
+    username: Optional[str] = None
+    full_name: str
+    password: str
+
+
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     full_name: Optional[str] = None

@@ -6,7 +6,7 @@ from app.deps import get_db, get_current_user
 from app.models import (
     Asset, AssetType, Employee, Repair, AssetPrice, AssetHistory, User,
 )
-from app.serializers import history_to_dict
+from app.serializers import history_to_dict, _to_float
 
 router = APIRouter()
 
@@ -34,24 +34,24 @@ def get_dashboard_stats(
     )
     assets_by_type = {name: count for name, count in by_type_rows if count > 0}
 
-    # Purchase value grouped by currency
-    purchase_rows = (
-        db.query(AssetPrice.currency, func.sum(AssetPrice.purchase_price))
-        .group_by(AssetPrice.currency)
-        .all()
-    )
+    # Purchase value grouped by currency.
+    # purchase_price / repair_cost are encrypted, so sums are computed in the
+    # app layer (the ORM type decrypts each value on read).
+    purchase_totals = {}
+    for p in db.query(AssetPrice).all():
+        cur = p.currency or "INR"
+        purchase_totals[cur] = purchase_totals.get(cur, 0.0) + (_to_float(p.purchase_price) or 0.0)
     purchase_by_currency = [
-        {"currency": c or "INR", "total": float(t or 0)} for c, t in purchase_rows
+        {"currency": c, "total": t} for c, t in purchase_totals.items()
     ]
 
     # Repair cost grouped by currency
-    repair_rows = (
-        db.query(Repair.repair_currency, func.sum(Repair.repair_cost))
-        .group_by(Repair.repair_currency)
-        .all()
-    )
+    repair_totals = {}
+    for r in db.query(Repair).all():
+        cur = r.repair_currency or "INR"
+        repair_totals[cur] = repair_totals.get(cur, 0.0) + (_to_float(r.repair_cost) or 0.0)
     repair_by_currency = [
-        {"currency": c or "INR", "total": float(t or 0)} for c, t in repair_rows
+        {"currency": c, "total": t} for c, t in repair_totals.items()
     ]
 
     return {

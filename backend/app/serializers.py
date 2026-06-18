@@ -7,6 +7,16 @@ so we build the dicts explicitly here.
 from app.utils import parse_options
 
 
+def _to_float(value):
+    """Parse a value that may be a decrypted string, Decimal, or None."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
 def field_to_dict(field) -> dict:
     return {
         "id": field.id,
@@ -100,7 +110,7 @@ def price_to_dict(p) -> dict:
         "asset_id": p.asset_id,
         "asset_code": p.asset.asset_id if p.asset else None,
         "asset_description": p.asset.description if p.asset else None,
-        "purchase_price": float(p.purchase_price) if p.purchase_price is not None else None,
+        "purchase_price": _to_float(p.purchase_price),
         "currency": p.currency,
         "purchase_date": p.purchase_date,
         "vendor": p.vendor,
@@ -129,7 +139,7 @@ def repair_to_dict(r) -> dict:
         "returned_date": r.returned_date,
         "time_taken_days": r.time_taken_days,
         "repair_vendor": r.repair_vendor,
-        "repair_cost": float(r.repair_cost) if r.repair_cost is not None else None,
+        "repair_cost": _to_float(r.repair_cost),
         "repair_currency": r.repair_currency,
         "under_warranty": r.under_warranty,
         "status": r.status,

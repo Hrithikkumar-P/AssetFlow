@@ -34,15 +34,22 @@ def list_repairs(
     query = db.query(Repair).join(Asset, Repair.asset_id == Asset.id)
     if status:
         query = query.filter(Repair.status == status)
-    if search:
-        like = f"%{search}%"
-        query = query.filter(
-            Repair.repair_id.ilike(like)
-            | Asset.asset_id.ilike(like)
-            | Asset.description.ilike(like)
-            | Repair.repair_vendor.ilike(like)
-        )
     repairs = query.order_by(Repair.created_at.desc()).all()
+
+    if search:
+        # repair_vendor is encrypted at rest, so search is done in the app layer.
+        s = search.lower()
+
+        def matches(r):
+            haystay = [
+                r.repair_id,
+                r.asset.asset_id if r.asset else None,
+                r.asset.description if r.asset else None,
+                r.repair_vendor,   # already decrypted by the ORM type
+            ]
+            return any(h and s in h.lower() for h in haystay)
+
+        repairs = [r for r in repairs if matches(r)]
     return [repair_to_dict(r) for r in repairs]
 
 
@@ -81,7 +88,8 @@ def create_repair(
         asset_id=asset.id,
         asset_code=asset.asset_id,
         notes=payload.issue_description,
-        new_value=f"{payload.repair_currency} {payload.repair_cost}" if payload.repair_cost else None,
+        # Avoid writing the (sensitive) cost into the plaintext history log.
+        new_value=f"{payload.repair_currency} repair cost recorded" if payload.repair_cost else None,
     )
     db.commit()
     db.refresh(repair)

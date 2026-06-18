@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.deps import get_db, get_current_user
-from app.models import User, PasswordResetRequest
+from app.models import User, PasswordResetRequest, LoginAttempt
 from app.schemas import UserCreate, UserUpdate, UserResponse, PasswordResetApprove
-from app.auth import get_password_hash
+from app.auth import get_password_hash, validate_password_strength
 from app.activity import log_activity
 
 router = APIRouter()
@@ -58,6 +58,7 @@ def create_user(
     if payload.username and db.query(User).filter(User.username == payload.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
 
+    validate_password_strength(payload.password)
     user = User(
         email=payload.email,
         username=payload.username or None,
@@ -112,6 +113,7 @@ def update_user(
         raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
 
     if data.get("password"):
+        validate_password_strength(data["password"])
         user.hashed_password = get_password_hash(data.pop("password"))
     else:
         data.pop("password", None)
@@ -218,7 +220,10 @@ def approve_reset_request(
     if not user:
         raise HTTPException(status_code=404, detail="User no longer exists")
 
+    validate_password_strength(payload.new_password)
     user.hashed_password = get_password_hash(payload.new_password)
+    # Lift any failed-login lockout for this user.
+    db.query(LoginAttempt).filter(LoginAttempt.user_id == user.id).delete()
     req.status = "approved"
     req.resolved_by = current_user.email
     req.resolved_at = datetime.now(timezone.utc)
